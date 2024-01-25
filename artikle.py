@@ -19,7 +19,7 @@ image_dir = 'images'
 os.makedirs(image_dir, exist_ok=True)
 
 # Ensure that the environment variable OPENAI_API_KEY is set in your environment before running this script.
-openai.api_key = "sk-XXXXX"
+openai.api_key = "sk-XXX"
 
 # Corrected the regular expression for safe filenames
 SAFE_FILENAME_PATTERN = re.compile(r'[^\w\-_]')
@@ -27,8 +27,23 @@ SAFE_FILENAME_PATTERN = re.compile(r'[^\w\-_]')
 def safe_filename(filename):
     return SAFE_FILENAME_PATTERN.sub('', filename)
 
-def generate_article(topic):
-    print(f"Generating article on the topic: {topic}")
+def generate_unique_title(topic):
+    print(f"Generating a unique title for the topic: {topic}")
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4-1106-preview",
+            messages=[
+                {"role": "system", "content": "You are an expert in generating unique article titles. Use an engaging and SEO-friendly title for the given topic."},
+                {"role": "user", "content": f"Generate a unique and catchy title for an article about {topic}"}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message['content'].strip()
+    except Exception as e:
+        return str(e)
+
+def generate_article(topic, title):
+    print(f"Generating article on the topic: {topic} with the title: {title}")
     try:
         instruction = ("Write a detailed article about {}. Output should be HTML. "
                        "Do not end headings with 'in the Australian context', "
@@ -45,7 +60,11 @@ def generate_article(topic):
             ],
             temperature=0.5
         )
-        return response.choices[0].message['content'].strip()
+        article = response.choices[0].message['content'].strip()
+
+        # Add the generated title to the article
+        article_with_title = f"<h1>{title}</h1>\n\n{article}"
+        return article_with_title
     except Exception as e:
         return str(e)
 
@@ -124,10 +143,10 @@ def save_to_html_file(content, filename):
     except Exception as e:
         print(f"Failed to save article {filename}.html: {e}")
 
-def save_to_csv(file_path, data, categories, tags, image_filename, excerpt):
+def save_to_csv(file_path, title, content, categories, tags, image_filename, excerpt):
     with open(file_path, 'a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
-        writer.writerow(data + [', '.join(categories), ', '.join(tags), image_filename, image_filename, excerpt])
+        writer.writerow([title, content, ', '.join(categories), ', '.join(tags), image_filename, image_filename, excerpt])
 
 if __name__ == "__main__":
     output_csv = 'articles_summary.csv'
@@ -141,10 +160,13 @@ if __name__ == "__main__":
             article_title = row[0]
             url_safe_article_title = safe_filename(article_title.replace(" ", "-"))
 
-            article = generate_article(article_title)
+            # Generate a unique title
+            unique_title = generate_unique_title(article_title)
+
+            article = generate_article(article_title, unique_title)
             if article:
                 summary = summarize_article(article)
-                html_content = format_html(article, article_title, url_safe_article_title, summary)
+                html_content = format_html(article, unique_title, url_safe_article_title, summary)
                 html_filename = f"{url_safe_article_title}.html"
                 save_to_html_file(html_content, url_safe_article_title)
 
@@ -160,7 +182,7 @@ if __name__ == "__main__":
                 try:
                     image_filename = generate_dalle3_image(summary, url_safe_article_title)
                     image_path = os.path.join(image_dir, image_filename)
-                    save_to_csv(output_csv, [article_title, html_content], categories, tags, image_path, excerpt)
+                    save_to_csv(output_csv, [unique_title, html_content], categories, tags, image_path, excerpt)
                 except Exception as e:
                     print(str(e))
             else:
