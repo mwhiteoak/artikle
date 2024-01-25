@@ -19,7 +19,7 @@ image_dir = 'images'
 os.makedirs(image_dir, exist_ok=True)
 
 # Ensure that the environment variable OPENAI_API_KEY is set in your environment before running this script.
-openai.api_key = "sk-XXX"
+openai.api_key = "sk-XXXX"
 
 # Corrected the regular expression for safe filenames
 SAFE_FILENAME_PATTERN = re.compile(r'[^\w\-_]')
@@ -34,7 +34,7 @@ def generate_unique_title(topic):
             model="gpt-4-1106-preview",
             messages=[
                 {"role": "system", "content": "You are an expert in generating unique article titles. Use an engaging and SEO-friendly title for the given topic."},
-                {"role": "user", "content": f"Generate a unique and catchy title for an article about {topic}"}
+                {"role": "user", "content": f"Generate a unique and catchy title for an article about {topic}."}
             ],
             temperature=0.7
         )
@@ -51,7 +51,7 @@ def generate_article(topic, title):
                        "avoid including 'Australia' in the heading, and "
                        "avoid including 'Australian' in the heading. "
                        "Include references to Australian legislation, best practices, and "
-                       "any other relevant local context.")
+                       "any other relevant local context. Write the article in Australian English.")
         response = openai.ChatCompletion.create(
             model="gpt-4-1106-preview",
             messages=[
@@ -89,8 +89,23 @@ def summarize_article(article):
         return str(e)
 
 def generate_excerpt(article, max_length=300):
-    """ Generate an excerpt by taking the first max_length characters from the article. """
-    return article[:max_length]
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo-1106",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"summarize the following article in a maximum of 300 words:\n\n{article}'''"
+                }
+            ],
+            temperature=0.7,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0
+        )
+        return response.choices[0].message['content'].strip()
+    except Exception as e:
+        return str(e)
 
 def generate_dalle3_image(summary, url_safe_article_title):
     print(f"Generating image for {url_safe_article_title}.")
@@ -143,10 +158,11 @@ def save_to_html_file(content, filename):
     except Exception as e:
         print(f"Failed to save article {filename}.html: {e}")
 
-def save_to_csv(file_path, title, content, categories, tags, image_filename, excerpt):
+def save_to_csv(file_path, title, content, categories, tags, image_filename, featured_image, excerpt):
     with open(file_path, 'a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
-        writer.writerow([title, content, ', '.join(categories), ', '.join(tags), image_filename, image_filename, excerpt])
+        writer.writerow([title, content, ', '.join(categories), ', '.join(tags), image_filename, featured_image, excerpt])
+
 
 if __name__ == "__main__":
     output_csv = 'articles_summary.csv'
@@ -179,10 +195,11 @@ if __name__ == "__main__":
                 categories = most_common_words[:6]
                 tags = most_common_words[-2:]
 
+
                 try:
                     image_filename = generate_dalle3_image(summary, url_safe_article_title)
                     image_path = os.path.join(image_dir, image_filename)
-                    save_to_csv(output_csv, [unique_title, html_content], categories, tags, image_path, excerpt)
+                    save_to_csv(output_csv, unique_title, html_content, categories, tags, image_path, image_path, excerpt)
                 except Exception as e:
                     print(str(e))
             else:
