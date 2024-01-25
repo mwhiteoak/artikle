@@ -9,13 +9,17 @@ import csv
 from collections import Counter
 import nltk
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
+from nltk.tokenize import word_tokenize, sent_tokenize
 
 nltk.download('punkt')
 nltk.download('stopwords')
 
+# Directory for saving images
+image_dir = 'images'
+os.makedirs(image_dir, exist_ok=True)
+
 # Ensure that the environment variable OPENAI_API_KEY is set in your environment before running this script.
-openai.api_key = "sk-XXXXXXX"
+openai.api_key = "sk-XXXXX"
 
 # Corrected the regular expression for safe filenames
 SAFE_FILENAME_PATTERN = re.compile(r'[^\w\-_]')
@@ -26,10 +30,11 @@ def safe_filename(filename):
 def generate_article(topic):
     print(f"Generating article on the topic: {topic}")
     try:
-        # Adding instructions to avoid specific phrases in the article
         instruction = ("Write a detailed article about {}. Output should be HTML. "
-                       "Do not end headings with 'in the Australian context' and "
-                       "avoid concluding the article with the word 'Conclusion'. "
+                       "Do not end headings with 'in the Australian context', "
+                       "avoid concluding the article with the word 'Conclusion', "
+                       "avoid including 'Australia' in the heading, and "
+                       "avoid including 'Australian' in the heading. "
                        "Include references to Australian legislation, best practices, and "
                        "any other relevant local context.")
         response = openai.ChatCompletion.create(
@@ -64,12 +69,16 @@ def summarize_article(article):
     except Exception as e:
         return str(e)
 
+def generate_excerpt(article, max_length=300):
+    """ Generate an excerpt by taking the first max_length characters from the article. """
+    return article[:max_length]
+
 def generate_dalle3_image(summary, url_safe_article_title):
     print(f"Generating image for {url_safe_article_title}.")
     try:
         response = openai.Image.create(
             model="dall-e-3",
-            prompt=f"Create a technical illustration of a '{summary}'. The drawing should use multiple lines to depict the detailed structure and components commonly found in '{summary}'. The focus should be on accuracy and clarity, providing a precise and informative view of the '{summary}'. The style should resemble a schematic or blueprint, commonly used in engineering and technical documentation, with clear lines set against a solid block color background of hex #2c4a20. NO WORDS. NO NUMBERS.",
+            prompt=f"Create a technical illustration of a '{summary}'. The drawing should use multiple lines to depict the detailed structure and components commonly found in '{summary}'. The focus should be on accuracy and clarity, providing a precise and informative view of the '{summary}'. The style should resemble a schematic or blueprint, commonly used in engineering and technical documentation, with clear lines set against a solid block color background of hex #2c4a20. Do not include words. Do not include numbers.",
             size="1792x1024",
             quality="standard",
             n=1,
@@ -79,7 +88,7 @@ def generate_dalle3_image(summary, url_safe_article_title):
 
         if image_response.status_code == 200:
             image = Image.open(BytesIO(image_response.content))
-            image_filename = f'./{url_safe_article_title}.png'
+            image_filename = os.path.join(image_dir, f'{url_safe_article_title}.png')
             image.save(image_filename)
             print(f"Image saved as '{image_filename}'")
             return image_filename
@@ -92,7 +101,6 @@ def generate_dalle3_image(summary, url_safe_article_title):
 def format_html(article, article_title, url_safe_article_title, summary):
     title = article_title  # Use the original article title for the title
 
-    # Format the content into HTML format with the new summary and correct image filename
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -116,17 +124,16 @@ def save_to_html_file(content, filename):
     except Exception as e:
         print(f"Failed to save article {filename}.html: {e}")
 
-def save_to_csv(file_path, data, categories, tags, image_filename):
+def save_to_csv(file_path, data, categories, tags, image_filename, excerpt):
     with open(file_path, 'a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
-        writer.writerow(data + [', '.join(categories), ', '.join(tags), image_filename, image_filename])
+        writer.writerow(data + [', '.join(categories), ', '.join(tags), image_filename, image_filename, excerpt])
 
 if __name__ == "__main__":
     output_csv = 'articles_summary.csv'
-    # Write headers to the CSV file
     with open(output_csv, 'w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
-        writer.writerow(['Article Title', 'Content (HTML)', 'Categories', 'Tags', 'Image', 'Featured Image'])
+        writer.writerow(['Article Title', 'Content (HTML)', 'Categories', 'Tags', 'Image', 'Featured Image', 'Excerpt'])
 
     with open('topics.csv', newline='') as csvfile:
         topics_reader = csv.reader(csvfile)
@@ -141,18 +148,19 @@ if __name__ == "__main__":
                 html_filename = f"{url_safe_article_title}.html"
                 save_to_html_file(html_content, url_safe_article_title)
 
-                # Generate categories and tags from the summary
+                excerpt = generate_excerpt(article)
+
                 words = word_tokenize(summary.lower())
-                words = [word for word in words if word.isalpha()]  # Remove punctuation
-                words = [word for word in words if word not in stopwords.words('english')]  # Remove stopwords
+                words = [word for word in words if word.isalpha()]
+                words = [word for word in words if word not in stopwords.words('english')]
                 most_common_words = [word for word, word_count in Counter(words).most_common(6)]
-                categories = most_common_words[:6]  # up to 6 categories
-                tags = most_common_words[-2:]  # last 2 words as tags
+                categories = most_common_words[:6]
+                tags = most_common_words[-2:]
 
                 try:
                     image_filename = generate_dalle3_image(summary, url_safe_article_title)
-                    # Save details to CSV
-                    save_to_csv(output_csv, [article_title, html_content], categories, tags, image_filename)
+                    image_path = os.path.join(image_dir, image_filename)
+                    save_to_csv(output_csv, [article_title, html_content], categories, tags, image_path, excerpt)
                 except Exception as e:
                     print(str(e))
             else:
